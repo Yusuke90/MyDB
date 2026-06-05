@@ -47,6 +47,7 @@ ExecuteResult execute_statement(const Statement& statement, Table& table);
 void serialize_row(const Row& source,void* destination);
 void deserialize_row(const void* source,Row& destination);
 void* row_slot(Table& table,uint32_t row_num);
+void free_table(Table& table);
 
 int main() {
     std::string input;
@@ -56,7 +57,10 @@ int main() {
         std::cout << "mydb> ";
         std::getline(std::cin, input);
         if (metacommand(input)) {
-            if (meta_command(input) == META_EXIT) break;
+            if (meta_command(input) == META_EXIT) {
+                free_table(table);
+                break;
+            }
             continue;
         }
         PrepareResult prepare_result = prepare_statement(input, stmt);
@@ -172,4 +176,13 @@ void* row_slot(Table& table,uint32_t row_num){
     uint32_t byte_offset = row_offset * ROW_SIZE;
 
     return static_cast<char*>(page) + byte_offset;
+}
+
+void free_table(Table& table) {
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
+        if (table.pages[i] != nullptr) {
+            operator delete(table.pages[i]);
+            table.pages[i] = nullptr;
+        }
+    }
 }
