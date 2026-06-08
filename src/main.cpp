@@ -3,6 +3,8 @@
 #include<sstream>
 #include<cstdint>
 #include<cstring>
+#include<fstream>
+#include<cstdlib>
 
 const uint32_t COLUMN_USERNAME_SIZE=32;
 const uint32_t COLUMN_EMAIL_SIZE=255;
@@ -18,6 +20,11 @@ const uint32_t ROWS_PER_PAGE=PAGE_SIZE/ROW_SIZE;
 const uint32_t TABLE_MAX_PAGES=100;
 const uint32_t TABLE_MAX_ROWS=ROWS_PER_PAGE*TABLE_MAX_PAGES;
 
+struct Pager{
+    std::fstream file;
+    uint32_t file_length;
+    void* pages[TABLE_MAX_PAGES]={};
+};
 
 struct Row {
     uint32_t id;
@@ -27,7 +34,7 @@ struct Row {
 
 struct Table {
     uint32_t num_rows=0;
-    void* pages[TABLE_MAX_PAGES]={};
+    Pager* pager;
 };
 
 enum StatementType { STATEMENT_INSERT, STATEMENT_SELECT };
@@ -48,17 +55,22 @@ void serialize_row(const Row& source,void* destination);
 void deserialize_row(const void* source,Row& destination);
 void* row_slot(Table& table,uint32_t row_num);
 void free_table(Table& table);
+Pager* pager_open(const std::string& filename);
+Table* db_open(const std::string& filename);
+void* get_page(Pager* pager,uint32_t page_num);
+void pager_flush(Pager* pager,uint32_t page_num,uint32_t size);
+void db_close(Table* table);
 
 int main() {
     std::string input;
-    Table table;
+    Table* table = db_open("mydb.db");
     Statement stmt;
     while (true) {
         std::cout << "mydb> ";
         std::getline(std::cin, input);
         if (metacommand(input)) {
             if (meta_command(input) == META_EXIT) {
-                free_table(table);
+                db_close(table);
                 break;
             }
             continue;
@@ -71,7 +83,7 @@ int main() {
         if (prepare_result == PREPARE_SYNTAX_ERROR) {
             continue;
         }
-        ExecuteResult execute_result=execute_statement(stmt,table);
+        ExecuteResult execute_result=execute_statement(stmt,*table);
         if(execute_result==EXECUTE_TABLE_FULL){
             std::cout<<"Error: Table full .\n";
             continue;
@@ -165,12 +177,7 @@ void deserialize_row(const void* source,Row& destination){
 
 void* row_slot(Table& table,uint32_t row_num){
     uint32_t page_num = row_num / ROWS_PER_PAGE;
-    void* page = table.pages[page_num];
-
-    if (page == nullptr) {
-        page = operator new(PAGE_SIZE);
-        table.pages[page_num] = page;
-    }
+    void* page = get_page(table.pager, page_num);
 
     uint32_t row_offset = row_num % ROWS_PER_PAGE;
     uint32_t byte_offset = row_offset * ROW_SIZE;
@@ -180,9 +187,104 @@ void* row_slot(Table& table,uint32_t row_num){
 
 void free_table(Table& table) {
     for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
-        if (table.pages[i] != nullptr) {
-            operator delete(table.pages[i]);
-            table.pages[i] = nullptr;
+        if (table.pager->pages[i] != nullptr) {
+            operator delete(table.pager->pages[i]);
+            table.pager->pages[i] = nullptr;
         }
     }
+}
+
+Pager* pager_open(const std::string& filename){
+    Pager* pager=new Pager();
+    pager->file.open(filename,std::ios::in|std::ios::out|std::ios::binary);
+    if(!pager->file.is_open()){
+        pager->file.open(filename,std::ios::out|std::ios::binary);
+        pager->file.close();
+        pager->file.open(filename,std::ios::in|std::ios::out|std::ios::binary);
+    }
+    pager->file.seekg(0,std::ios::end);
+    pager->file_length=pager->file.tellg();
+
+    for(uint32_t i=0;i<TABLE_MAX_PAGES;i++){
+        pager->pages[i]=nullptr;
+    }
+
+    return pager;
+}
+
+Table* db_open(const std::string& filename){
+    Table* table=new Table();
+    table->pager=pager_open(filename);
+    table->num_rows=(table->pager->file_length)/ROW_SIZE;
+    return table;
+}
+
+void* get_page(Pager* pager,uint32_t page_num){
+    if (page_num >= TABLE_MAX_PAGES) {
+        std::cout << "Tried to fetch page number out of bounds.\n";
+        std::exit(1);
+    }
+
+    if (pager->pages[page_num] == nullptr) {
+        void* page = operator new(PAGE_SIZE);
+
+        uint32_t num_pages = pager->file_length / PAGE_SIZE;
+        if (pager->file_length % PAGE_SIZE != 0) {
+            num_pages++;
+        }
+
+        if (page_num < num_pages) {
+            pager->file.seekg(page_num * PAGE_SIZE, std::ios::beg);
+            pager->file.read(static_cast<char*>(page), PAGE_SIZE);
+        }
+
+        pager->pages[page_num] = page;
+    }
+
+    return pager->pages[page_num];
+}
+
+void pager_flush(Pager* pager,uint32_t page_num,uint32_t size){
+    if(pager->pages[page_num]!=nullptr){
+       pager->file.seekp(page_num*PAGE_SIZE,std::ios::beg);
+       pager->file.write(static_cast<char*>(pager->pages[page_num]),size);
+       pager->file.flush();
+    }
+    else{
+        return;
+    }
+}
+
+void db_close(Table* table){
+    Pager* pager=table->pager;
+
+    uint32_t num_full_pages=table->num_rows/ROWS_PER_PAGE;
+
+    for (uint32_t i = 0; i < num_full_pages; i++) {
+        if (pager->pages[i] != nullptr) {
+            pager_flush(pager, i, PAGE_SIZE);
+        }
+    }
+
+    uint32_t num_additional_rows=table->num_rows%ROWS_PER_PAGE;
+    if(num_additional_rows>0){
+        uint32_t page_num=num_full_pages;
+        if(pager->pages[page_num]!=nullptr){
+            pager_flush(pager,page_num,num_additional_rows*ROW_SIZE);
+        }
+    }
+
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
+        if (pager->pages[i] != nullptr) {
+            operator delete(pager->pages[i]);
+            pager->pages[i] = nullptr;
+        }
+    }
+
+    if(pager->file.is_open()){
+        pager->file.close();
+    }
+
+    delete pager;
+    delete table;
 }
