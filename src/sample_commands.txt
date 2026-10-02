@@ -1,0 +1,5 @@
+select
+insert 1 alice alice@example.com
+insert 2 bob bob@example.com
+select
+.exit
