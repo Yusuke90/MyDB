@@ -2,4 +2,4 @@
 *.o
 *.obj
 .vscode/
-build/
+build/*.db

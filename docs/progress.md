@@ -166,4 +166,61 @@ select command
 - [ ] B-Tree Search
 - [ ] B-Tree Insert
 
-# MyDB Progress Log-3 
+# MyDB Progress Log-3
+
+## Stage 6: Pager and Database File
+
+### Features Implemented
+- Added a pager that loads pages from `mydb.db` on demand
+- Added database open and close operations
+- Flushes dirty in-memory pages when `.exit` closes the database
+- Restores `num_rows` from the database file length
+- Verified that inserted rows persist after closing and reopening MyDB
+
+## Stage 7: Cursor
+
+### Features Implemented
+- Added a `Cursor` containing the table, row position, and end-of-table state
+- Added `table_start()` and `table_end()`
+- Added `cursor_value()` and `cursor_advance()`
+- Insert and select now access rows through cursors
+
+### Key Concept
+A cursor represents a position in a table. This keeps statement execution
+independent from the current row storage layout and prepares the code for
+walking B-tree leaves later.
+
+### Next
+
+- [x] Pager
+- [x] Database File
+- [x] Cursor
+- [x] B-Tree Nodes
+- [x] B-Tree Search
+- [x] B-Tree Insert
+
+# MyDB Progress Log-5
+
+## Stage 9: B-tree Indexing
+
+### Features Implemented
+- Added a `BTreeNode` structure and minimum-degree configuration
+- Added root insertion and child split logic
+- Added recursive B-tree search for keys
+- Added insertion that keeps the tree balanced
+- Added cleanup for the tree structure on shutdown
+
+### Key Concept
+The database can now use a balanced tree to quickly locate row keys without scanning every row in the table.
+
+# MyDB Progress Log-4
+
+## Stage 8: Source-file separation
+
+### Features Implemented
+- Added `mydb.hpp` for shared constants, types, and function declarations
+- Reduced `main.cpp` to the REPL control loop
+- Moved command parsing and meta commands into `repl.cpp`
+- Moved row storage, paging, persistence, execution, and cursors into `database.cpp`
+- Kept a clear place for a future `btree.cpp` module
+- Verified that insert and select still persist data across restarts

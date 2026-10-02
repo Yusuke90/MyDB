@@ -1,0 +1,5 @@
+select
+insert 1 alice alice@example.com
+insert 2 bob_with_a_very_long_username_exceeding_limit bob@example.com
+select
+.exit
